@@ -1,0 +1,29 @@
+ L^2 residual = 5.27946e-10
+  -- Solve :
+          min -0.13029  max 0.146608
+          min -0.000494443  max 0.806106
+  SkyLineMatrix: size pL/pU: 23136 2585140 2585140 moy=111.737
+  -- Solve :
+          min 0.0438595  max 1
+  -- Solve :
+          min 0.0489393  max 1
+  -- Solve :
+          min 0.0542878  max 1
+  -- Solve :
+          min 0.059839  max 1
+  -- Solve :
+          min 0.0655378  max 1
+  -- Solve :
+          min 0.0713381  max 1
+  -- Solve :
+          min 0.0772014  max 1
+  -- Solve :
+          min 0.0830955  max 1
+  -- Solve :
+          min 0.088994  max 1
+  -- Solve :
+          min 0.0948749  max 1
+----------------iter = 1
+----------------penalty = 0.110803
+ Objective (compliance energy) :=  0.105017
+ kk 2 3 :  try getConsole D:\A_ECNU\Code\Git\HVI_PhaseField_M3_2d.edp

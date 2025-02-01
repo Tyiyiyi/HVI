@@ -1,0 +1,181 @@
+///////////////////////////////////////////////////////////////////////////////
+// Mesh Geometric 
+///////////////////////////////////////////////////////////////////////////////
+load "iovtk"
+
+/* build mesh */
+border aa(t=0,1){x=t;y=0;label=11;};    
+border bb(t=1,0){x=t;y=1;label=22;};    
+border cc(t=0,1){x=1;y=t;label=44;};    
+border dd(t=1,0){x=0;y=t;label=44;};    
+border circle(t=2*pi,0){ x=0.5+0.2*cos(t);y=0.5+0.2*sin(t);label=33;};    
+int meshNum = 40;
+mesh Th = buildmesh(aa(meshNum)+bb(meshNum)+cc(meshNum)+dd(meshNum)+circle(1.4*meshNum));
+plot(Th,wait=1,fill=1);
+savevtk("InitialMesh.vtk", Th);
+savemesh(Th, "Th11.msh");
+
+/* definite the finite space */
+fespace Vh(Th,P1);
+Vh mx,my,ux,uy,vx,vy,px,py,V1,V2,theta1,theta2,dux,duy;
+
+/* parameters and functions */
+real E = 1;
+real nu = 0.3;
+real mu = E/(2*(1+nu));
+real lambda = E*nu/((1+nu)*(1-2*nu));
+real gx = 0;
+real gy = -0.3;
+real a = 0.004;
+real b = 0.002;
+real alpha = 100;
+real eps1 = 1.0e-5;
+real eps2 = 1.0e-4;
+real diffu = 0.01;
+real lag;
+real penalty;
+real Vol;
+real C = 0.95;
+real VolumErr;
+real temp;
+real J = 1;
+real Jold;
+real TOL = 1.e-8;
+real step = 0.001;
+real minVal;
+real h0;
+int iter;
+int Niter = 200;
+string caption;
+real fcr;
+string backupname="InvProb";
+
+/* Initial values */
+Vol = int2d(Th)(1);
+lag = 0.01*(Vol-C)/C;
+penalty = 0.2*(Vol/C)*abs(lag);
+
+/* Define the macro */
+macro epsilon(ux,uy)  [dx(ux),dy(uy),(dy(ux)+dx(uy))/sqrt(2)] // EOM
+macro div(ux,uy) ( dx(ux)+dy(uy) )  // EOM
+macro Ut(mx,my) [mx-(mx*N.x+my*N.y)*N.x,my-(mx*N.x+my*N.y)*N.y] // EOM
+macro UtNorm(mx,my) (sqrt((mx-(mx*N.x+my*N.y)*N.x)^2+(my-(mx*N.x+my*N.y)*N.y)^2)) // EOM
+
+/* Adjoint Problem */
+problem Adjoint([px,py],[vx,vy])
+      = int2d(Th) (2*mu*(dx(px)*dx(vx)+dy(py)*dy(vy) + (dx(py)+dy(px))*(dx(vy)+dy(vx))/2 )
+                   +lambda*(dx(px)+dy(py))*(dx(vx)+dy(vy)))
+       +int1d(Th,11) ((-alpha*(a-b)*exp(-alpha*UtNorm(ux,uy)))*(UtNorm(ux,uy)>eps1)*(Ut(px,py)'*Ut(vx,vy))
+                      +((a-b)/eps1*(1-alpha*UtNorm(ux,uy)*UtNorm(ux,uy)/eps1)*exp(-alpha*(UtNorm(ux,uy)*UtNorm(ux,uy)/(2*eps1)+eps1/2.))+b/eps1)*(UtNorm(ux,uy)<=eps1)*(Ut(px,py)'*Ut(vx,vy)))
+       +int1d(Th,22) (gx*vx+gy*vy)
+       +on(44,px=0,py=0)
+       +on(11,py=0);
+
+/* Smoothing */
+problem Smoothing([V1,V2],[theta1,theta2])
+      = int2d(Th) (diffu*(dx(V1)*dx(theta1)+dy(V1)*dy(theta1)+dx(V2)*dx(theta2)+dy(V2)*dy(theta2))+V1*theta1+V2*theta2)
+       +int1d(Th,33) ((2*mu*(dx(ux)*dx(px)+dy(uy)*dy(py) + (dx(uy)+dy(ux))*(dx(py)+dy(px))/2 )
+                      +lambda*(dx(ux)+dy(uy))*(dx(px)+dy(py)) - lag + penalty*(Vol-C))*(theta1*N.x+theta2*N.y))
+       +on(11,22,44,V1=0,V2=0);  
+ux=0.1;
+uy=0.1;
+solve NTStateEx([dux,duy],[vx,vy])
+        = int2d(Th) (2*mu*epsilon(dux,duy)'*epsilon(vx,vy)
+                    +lambda*div(dux,duy)*div(vx,vy))
+         +int1d(Th,11) ((-alpha*(a-b)*exp(-alpha*UtNorm(ux,uy)))*(UtNorm(ux,uy)>eps1)*(Ut(dux,duy)'*Ut(vx,vy))
+                        +((a-b)/eps1*(1-alpha*UtNorm(ux,uy)*UtNorm(ux,uy)/eps1)*exp(-alpha*(UtNorm(ux,uy)*UtNorm(ux,uy)/(2*eps1)+eps1/2))+b/eps1)*(UtNorm(ux,uy)<=eps1)*(Ut(dux,duy)'*Ut(vx,vy)))
+         +int2d(Th) (2*mu*epsilon(ux,uy)'*epsilon(vx,vy)
+                     +lambda*div(ux,uy)*div(vx,vy))
+         +int1d(Th,11) ( ((a-b)/UtNorm(ux,uy)*exp(-alpha*UtNorm(ux,uy))+b/UtNorm(ux,uy))*(Ut(ux,uy)'*Ut(vx,vy))*(UtNorm(ux,uy)>eps1)
+                        +((a-b)/eps1*exp(-alpha*(UtNorm(ux,uy)*UtNorm(ux,uy)/(2*eps1)+eps1/2))+b/eps1)*(Ut(ux,uy)'*Ut(vx,vy))*(UtNorm(ux,uy)<=eps1)
+                        )
+         -int1d(Th,22) (gx*vx+gy*vy)
+         +on(44,dux=0,duy=0)
+         +on(11,duy=0);
+ux = dux;
+uy = duy;
+
+/* Main Loop */
+for (iter=1;iter<Niter;iter++)
+{
+  /* calculate State problem */
+  for (int i=1;i<20;i++)
+  {
+    solve NTStateEx([dux,duy],[vx,vy])
+        = int2d(Th) (2*mu*epsilon(dux,duy)'*epsilon(vx,vy)
+                    +lambda*div(dux,duy)*div(vx,vy))
+         +int1d(Th,11) ((-alpha*(a-b)*exp(-alpha*UtNorm(ux,uy)))*(UtNorm(ux,uy)>eps1)*(Ut(dux,duy)'*Ut(vx,vy))
+                        +((a-b)/eps1*(1-alpha*UtNorm(ux,uy)*UtNorm(ux,uy)/eps1)*exp(-alpha*(UtNorm(ux,uy)*UtNorm(ux,uy)/(2*eps1)+eps1/2))+b/eps1)*(UtNorm(ux,uy)<=eps1)*(Ut(dux,duy)'*Ut(vx,vy)))
+         +int2d(Th) (2*mu*epsilon(ux,uy)'*epsilon(vx,vy)
+                     +lambda*div(ux,uy)*div(vx,vy))
+         +int1d(Th,11) ( ((a-b)/UtNorm(ux,uy)*exp(-alpha*UtNorm(ux,uy))+b/UtNorm(ux,uy))*(Ut(ux,uy)'*Ut(vx,vy))*(UtNorm(ux,uy)>eps1)
+                        +((a-b)/eps1*exp(-alpha*(UtNorm(ux,uy)*UtNorm(ux,uy)/(2*eps1)+eps1/2))+b/eps1)*(Ut(ux,uy)'*Ut(vx,vy))*(UtNorm(ux,uy)<=eps1)
+                        )
+         -int1d(Th,22) (gx*vx+gy*vy)
+         +on(44,dux=0,duy=0)
+         +on(11,duy=0);
+    ux = ux + dux;
+    uy = uy + duy;
+    temp = int2d(Th) (dux^2+duy^2); //2_norm
+    cout<<" NewtonIter= "<<i<<endl;
+    cout << " L^2 residual = "<<temp<<endl;
+    if (temp < eps2) break;
+  }
+
+  /* Adjoint problem */
+  Adjoint;
+  Smoothing;
+  if(iter>1)
+  {
+    V1 = V1/V1[].linfty;
+    V2 = V2/V2[].linfty;
+  }
+
+  /* Stopping*/
+  Jold = J;
+  J = int1d(Th,22)(gx*ux+gy*uy);
+  if ( abs(J-Jold)<TOL*Jold )
+  {
+    cout<<"Code Stops!"<<endl;
+    break;
+  }
+
+  /* Update */
+  lag -= penalty*(Vol-C);
+  if ( ( iter != 0 ) && ( iter%3 == 0 ) && ( iter <= 250 ) ) penalty *= 1.4;
+  h0 = sqrt(Vol/Vh.nt*4./sqrt(3.));
+
+  /* Necessary steps*/
+  minVal=checkmovemesh(Th,[x,y])/1000.;
+  cout<<"minimal area of triangle after moving mesh: "<<minVal<<endl;
+  while(1){
+      real mint = checkmovemesh(Th,[x+step*V1,y+step*V2]);
+      cout<<"...mint "<<mint<<endl;
+      if (mint>minVal) break;
+      cout<<" reversed triangle =>step=0.5*step"<<endl;
+      step=step/2.0;
+  }
+  cout<<"step size "<<step<<endl;
+
+  /* Move mesh */
+  Th=movemesh(Th,[x+step*V1,y+step*V2]);
+
+  /* Adaptmesh */
+  if (iter%5==0)
+  {
+    Th = adaptmesh(Th,h0,IsMetric=1);
+  }
+
+  if ( iter>100 & Jold>J )
+  {
+    step=step*0.5;
+  }
+
+
+  /* Plot mesh */
+  plot(Th,wait=0,fill=1);
+
+}
+savevtk("ResultMesh.vtk", Th);
+savemesh(Th, "Th.msh");
+

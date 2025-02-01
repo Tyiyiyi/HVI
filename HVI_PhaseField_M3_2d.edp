@@ -1,0 +1,180 @@
+////////////////////////////////////////////////////////////////////////////////
+/*topology optimization of structure (Wheel) */
+////////////////////////////////////////////////////////////////////////////////
+load "iovtk"
+
+/* build mesh */
+border aa(t=0,2){x=t;y=0;label=11;};    
+border bb1(t=2,1.6){x=t;y=1;label=33;};    
+border bb2(t=1.6,1.4){x=t;y=1;label=22;};    
+border bb3(t=1.4,1.1){x=t;y=1;label=33;};    
+border bb4(t=1.1,0.9){x=t;y=1;label=22;};   
+border bb5(t=0.9,0.6){x=t;y=1;label=33;};   
+border bb6(t=0.6,0.4){x=t;y=1;label=22;};    
+border bb7(t=0.4,0){x=t;y=1;label=33;};    
+border cc(t=0,1){x=2;y=t;label=44;};
+border dd(t=1,0){x=0;y=t;label=44;};    
+mesh Th = buildmesh(aa(200)+bb1(40)+bb2(20)+bb3(30)+bb4(20)+bb5(30)+bb6(20)+bb7(40)+cc(100)+dd(100));
+plot(Th,wait=1);
+
+/* define the finite space */
+fespace Vh(Th,P1);
+Vh ux,uy,vx,vy,px,py,dux,duy,rho,phi,chi,psi,Xapprox,Xprime,Jprime,gradient;
+
+/* parameters */
+real E      = 1.0;
+real nu     = 0.3;
+real lambda = E*nu/((1.+nu)*(1.-2.*nu));
+real mu     = E/(2.*(1.+nu));
+real gx = 0;
+real gy = -0.3;
+real a = 0.004;
+real b = 0.002;
+real alpha = 100;
+real eps1 = 1.0e-3;
+int  p        = 3;
+real material = 1.0;
+real rhomin = 1e-3;
+real eps2    = 1e-3;
+real lag      = 0;
+real penalty0 = 0.1;
+real penalty = penalty0;
+real scaling = 1.0/0.95;
+int  MaxIter = 250;
+int  InnerIter= 10;
+real VolFrac = 0.45;
+real TotVolume = int2d(Th)(1.0);
+real OmegaVol,VolErr, Jold;
+real J = 1.;
+real Tol = 1.e-6;
+real ContVol = VolFrac*TotVolume;
+Vh h = hTriangle;
+real MeshSize = h[].max;
+real dt;
+real StepPara = 0.005;
+real eta = 20;
+real beta = 0.01;
+real temp;
+string caption;
+int j;
+real fcr;
+string backupname="InvProb";
+dt = StepPara*MeshSize;
+
+/* define the macro */
+macro epsilon(ux,uy)  [dx(ux),dy(uy),(dy(ux)+dx(uy))/sqrt(2)] // EOM
+macro div(ux,uy) ( dx(ux)+dy(uy) )  // EOM
+macro Ut(ux,uy) [ux-(ux*N.x+uy*N.y)*N.x,uy-(ux*N.x+uy*N.y)*N.y] // EOM
+macro UtNorm(ux,uy) (sqrt((ux-(ux*N.x+uy*N.y)*N.x)^2+(uy-(ux*N.x+uy*N.y)*N.y)^2)) // EOM
+rho = randreal1();
+Xapprox = (0.1<=rho)*(rho<=1)*rho^p + (rho>=0)*(rho<0.1)*max(rho*0.01,1e-5);
+
+/* Adjoint Problem */
+problem Adjoint([px,py],[vx,vy])
+      = int2d(Th) (2*mu*Xapprox*(epsilon(px,py)'*epsilon(vx,vy))+lambda*Xapprox*(div(px,py)*div(vx,vy)))
+       +int1d(Th,11) ((-alpha*(a-b)*exp(-alpha*UtNorm(ux,uy)))*(UtNorm(ux,uy)>eps1)*(Ut(px,py)'*Ut(vx,vy))
+                      +((a-b)/eps1*(1-alpha*UtNorm(ux,uy)*UtNorm(ux,uy)/eps1)*exp(-alpha*(UtNorm(ux,uy)*UtNorm(ux,uy)/(2*eps1)+eps1/2.))+b/eps1)*(UtNorm(ux,uy)<=eps1)*(Ut(px,py)'*Ut(vx,vy)))
+       +int1d(Th,22) (gx*vx+gy*vy)
+       +on(44,px=0,py=0)
+       +on(11,py=0);
+
+/* Evolution Equation */
+Vh r = rho-0.5- 30*gradient*eta*(1-rho)*rho;
+problem PhaseField(phi,psi,init=j,solver=Cholesky)
+                = int2d(Th)( phi*psi + dt*(beta*(dx(phi)*dx(psi)+dy(phi)*dy(psi)))
+                + dt*(r>0)*rho*phi*r*psi - dt*(r<0)*phi*(1-rho)*r*psi )
+                - int2d(Th)( rho*psi + dt*(r>0)*(rho)*r*psi)
+                + on(22,phi=1);
+
+/* Main Loop */
+for(int iter = 0; iter <= MaxIter; iter++)
+{
+  Xapprox = (0.1<=rho)*(rho<=1)*rho^p + (rho>=0)*(rho<0.1)*max(rho*0.01,1e-5);
+  Xprime  = p*rho^(p-1)*(0.1<=rho)*(rho<=1) + 0.01*(rho>=0)*(rho<0.1)*((rho*0.01)>1e-5);
+  ux = 0.1;
+  uy = 0.1;
+
+  /* calculate State problem */
+  real Newtonstep=1;
+  real oldErr=1;
+  for (int i=1;i<10;i++)
+  {
+    solve NTStateEx([dux,duy],[vx,vy])
+        = int2d(Th) (2*mu*Xapprox*(dx(dux)*dx(vx)+dy(duy)*dy(vy) + (dx(duy)+dy(dux))*(dx(vy)+dy(vx))/2 )
+                    +lambda*Xapprox*(dx(dux)+dy(duy))*(dx(vx)+dy(vy)))
+         +int1d(Th,11) ((-alpha*(a-b)*exp(-alpha*UtNorm(ux,uy)))*(UtNorm(ux,uy)>eps1)*(Ut(dux,duy)'*Ut(vx,vy))
+                        +((a-b)/eps1*(1-alpha*UtNorm(ux,uy)*UtNorm(ux,uy)/eps1)*exp(-alpha*(UtNorm(ux,uy)*UtNorm(ux,uy)/(2*eps1)+eps1/2))+b/eps1)*(UtNorm(ux,uy)<=eps1)*(Ut(dux,duy)'*Ut(vx,vy)))
+         +int2d(Th) (2*mu*Xapprox*(dx(ux)*dx(vx)+dy(uy)*dy(vy) + (dx(uy)+dy(ux))*(dx(vy)+dy(vx))/2 )
+                     +lambda*Xapprox*(dx(ux)+dy(uy))*(dx(vx)+dy(vy)))
+         -int1d(Th,11) ( ((a-b)/UtNorm(ux,uy)*exp(-alpha*UtNorm(ux,uy))+b/UtNorm(ux,uy))*(Ut(ux,uy)'*Ut(vx,vy))*(UtNorm(ux,uy)>eps1)
+                        +((a-b)/eps1*exp(-alpha*(UtNorm(ux,uy)*UtNorm(ux,uy)/(2*eps1)+eps1/2))+b/eps1)*(Ut(ux,uy)'*Ut(vx,vy))*(UtNorm(ux,uy)<=eps1)
+                        )
+         -int1d(Th,22) (gx*vx+gy*vy)
+         +on(44,dux=0,duy=0)
+         +on(11,duy=0);
+    ux = ux + dux;
+    uy = uy + duy;
+    temp = int2d(Th) (dux^2+duy^2); //2_norm
+    cout<<" NewtonIter= "<<i<<endl;
+    cout << " L^2 residual = "<<temp<<endl;
+    if (temp < eps2) break;
+
+    // ux = ux + dux*Newtonstep;
+    // uy = uy + duy*Newtonstep;
+    // // Get out of the innerloop
+    // temp = int2d(Th)(dux^2+duy^2);
+    // if(temp>oldErr) Newtonstep/=2; 
+    // cout <<"InnerIter: " <<i <<" Err = "<<temp<<endl;
+    // if (temp < eps2) break;
+  }
+
+  /* Calculate  */
+  Adjoint;
+  OmegaVol = int2d(Th)(rho);
+  VolErr = abs(OmegaVol-ContVol);
+  fcr = OmegaVol/TotVolume;
+  VolErr = abs(OmegaVol-ContVol);
+  Jprime = ( 2.*mu*Xprime*(epsilon(ux,uy)'*epsilon(px,py))
+             + lambda*Xprime*(div(ux,uy)*div(px,py)) );
+  gradient = Jprime+ lag + penalty*(OmegaVol-ContVol);
+  real norm2 = int2d(Th)(gradient*gradient);
+  gradient = gradient/sqrt(norm2);
+
+  /* Update */
+  dt = StepPara*MeshSize;
+  for (j = 0; j < InnerIter; j++)
+  {
+    r = rho-0.5- 30*gradient*eta*(1-rho)*rho;
+    PhaseField;
+    rho = phi;
+    rho = max(0,rho);
+    rho = min(rho,material);
+  }
+
+  /* Update  */
+  lag = lag + penalty*(OmegaVol-ContVol);
+  if(penalty<5)  {penalty=penalty*scaling;}
+  cout<<"----------------iter = "<<iter<<endl;
+  cout<<"----------------penalty = "<<penalty<<endl;
+  Jold = J;
+  J = int1d(Th,22)(gx*ux+gy*uy);
+  cout<<" Objective (compliance energy) :=  "<<J<<endl;
+  if(abs(J-Jold)<Tol*Jold)
+  {
+    cout<<"Code Stops!"<<endl;
+    break;
+  }
+
+   /* Adjust */
+  if(iter>50 & Jold>J)
+  {
+    dt = dt*0.7;
+  }
+
+  /* Plot */
+  chi = (rho>0.5);
+  caption="Iteration:  "+iter+" Objective: "+J;
+  plot(chi,wait=0,fill=1,value=0,cmm=caption,WindowIndex=0);
+
+}
+savevtk(backupname+"Final.vtu", Th, Xapprox, dataname="phi");

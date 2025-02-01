@@ -1,0 +1,29 @@
+ NewtonIter= 1
+ L^2 residual = 3.54342e-07
+ kk 2 3 :   -- Solve :
+          min -0.0346578  max 0.034676
+          min 7.76645e-35  max 0.17877
+ kk 2 3 :   -- Solve :
+          min -2.75844e+06  max 2.74903e+06
+          min -1.42897e+06  max 2.34398e+06
+minimal area of triangle after moving mesh: 1.67414e-07
+...mint 0.000167414
+step size 5.55112e-20
+ kk 2 3 :   -- Solve :
+          min -7.82252e-05  max 0.00333892
+          min -0.000356777  max 0.000356903
+ NewtonIter= 1
+ L^2 residual = 3.54347e-07
+ kk 2 3 :   -- Solve :
+          min -0.0346578  max 0.0346761
+          min 7.78663e-35  max 0.17877
+ kk 2 3 :   -- Solve :
+          min -3.12623e+06  max 3.11557e+06
+          min -1.6195e+06  max 2.65651e+06
+minimal area of triangle after moving mesh: 1.67414e-07
+...mint 0.000167414
+step size 5.55112e-20
+ 0x21bffd6c750 VTK_FILE 1
+  number of required edges : 0
+times: compile 0.167s, execution 44.209s,  mpirank:0
+ try getConsole D:\A_ECNU\Code\Git\HVI_Inner_MeshMove.edp
